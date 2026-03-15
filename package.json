@@ -1,0 +1,21 @@
+{
+  "name": "deficredit",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @deficredit/frontend dev\" \"pnpm --filter @deficredit/backend dev\"",
+    "build": "pnpm --filter @deficredit/shared-types build && pnpm --filter @deficredit/iota-utils build && pnpm --filter @deficredit/backend build && pnpm --filter @deficredit/frontend build",
+    "db:push": "pnpm --filter @deficredit/backend db:push",
+    "db:seed": "pnpm --filter @deficredit/backend db:seed",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.4"
+  }
+}

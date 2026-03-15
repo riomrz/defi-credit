@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Borrower {
+  id         String   @id @default(cuid())
+  did        String   @unique
+  address    String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  scoreCards ScoreCard[]
+  vcs        VerifiableCredential[]
+  loans      LoanRequest[]
+}
+
+model Lender {
+  id          String   @id @default(cuid())
+  did         String   @unique
+  address     String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lpPositions LPPosition[]
+}
+
+model ScoreCard {
+  id           String   @id @default(cuid())
+  borrowerDid  String
+  score        Int
+  riskBand     String   // A, B, C, D
+  metrics      Json     // { revStability, payReliability, ... }
+  createdAt    DateTime @default(now())
+  borrower     Borrower @relation(fields: [borrowerDid], references: [did])
+}
+
+model VerifiableCredential {
+  id           String   @id @default(cuid())
+  borrowerDid  String
+  vcHash       String   @unique
+  vcJson       Json
+  anchoredTx   String?  // on-chain tx hash
+  issuedAt     DateTime @default(now())
+  expiresAt    DateTime
+  borrower     Borrower @relation(fields: [borrowerDid], references: [did])
+}
+
+model Pool {
+  id               String   @id @default(cuid())
+  onChainId        String   @unique  // 0x... address on IOTA
+  name             String
+  description      String
+  interestRateBps  Int
+  availableLiquidity BigInt
+  totalLiquidity   BigInt
+  minScore         Int
+  riskBand         String   // A, B, C (minimum accepted band)
+  createdAt        DateTime @default(now())
+  loanRequests     LoanRequest[]
+  lpPositions      LPPosition[]
+}
+
+model LoanRequest {
+  id            String   @id @default(cuid())
+  onChainId     String?  @unique  // LoanPosition object ID on IOTA
+  borrowerDid   String
+  borrowerAddr  String
+  poolId        String
+  principal     BigInt
+  totalDue      BigInt?
+  termYears     Int      @default(1)  // 1, 5, 10
+  status        Int      @default(0)  // 0=requested 1=funded 2=repaid
+  txHash        String?
+  vcHash        String?  // VC hash usato per la richiesta
+  requestedAt   DateTime @default(now())
+  fundedAt      DateTime?
+  repaidAt      DateTime?
+  borrower      Borrower @relation(fields: [borrowerDid], references: [did])
+  pool          Pool     @relation(fields: [poolId], references: [id])
+}
+
+model LPPosition {
+  id              String   @id @default(cuid())
+  onChainId       String?  @unique
+  lenderDid       String
+  lenderAddr      String
+  poolId          String
+  depositedAmount BigInt
+  shareBps        Int
+  createdAt       DateTime @default(now())
+  lender          Lender   @relation(fields: [lenderDid], references: [did])
+  pool            Pool     @relation(fields: [poolId], references: [id])
+}

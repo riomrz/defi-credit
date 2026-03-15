@@ -1,0 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   THEME VARIABLES
+   Applied via html.dark / html.light classes set by ThemeProvider
+   ============================================================ */
+
+/* Dark theme (default) */
+:root,
+html.dark {
+  --dc-surface:       #0F1729;
+  --dc-surface-2:     #0B1628;
+  --dc-card:          #1A2744;
+  --dc-input:         #243154;
+  --dc-border:        #2D3E5F;
+  --dc-border-2:      #1E3A5F;
+  --dc-border-hover:  #3D4E6F;
+  --dc-text:          #FFFFFF;
+  --dc-text-body:     #E2E8F0;
+  --dc-muted:         #94A3B8;
+  --dc-faint:         #64748B;
+
+  /* background & foreground for <body> */
+  --background: #0F1729;
+  --foreground: #E2E8F0;
+
+  /* Scrollbar */
+  --scrollbar-track: #1A2744;
+  --scrollbar-thumb: #2D3E5F;
+
+  /* Glass card */
+  --glass-bg:     rgba(26, 39, 68, 0.8);
+  --glass-border: rgba(45, 62, 95, 0.6);
+}
+
+/* Light theme */
+html.light {
+  --dc-surface:       #F1F5F9;
+  --dc-surface-2:     #E8EEF7;
+  --dc-card:          #FFFFFF;
+  --dc-input:         #F8FAFC;
+  --dc-border:        #E2E8F0;
+  --dc-border-2:      #EDF2F7;
+  --dc-border-hover:  #CBD5E1;
+  --dc-text:          #0F172A;
+  --dc-text-body:     #1E293B;
+  --dc-muted:         #64748B;
+  --dc-faint:         #94A3B8;
+
+  --background: #F1F5F9;
+  --foreground: #1E293B;
+
+  --scrollbar-track: #E2E8F0;
+  --scrollbar-thumb: #CBD5E1;
+
+  --glass-bg:     rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(226, 232, 240, 0.8);
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track  { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb  { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #6366F1; }
+
+/* ============================================================
+   SEMANTIC UTILITY CLASSES
+   Use these instead of hardcoded hex Tailwind classes.
+   They automatically adapt to the current theme.
+   ============================================================ */
+
+@layer utilities {
+  /* Text */
+  .text-dc         { color: var(--dc-text); }
+  .text-dc-muted   { color: var(--dc-muted); }
+  .text-dc-faint   { color: var(--dc-faint); }
+
+  /* Backgrounds */
+  .bg-dc-surface   { background-color: var(--dc-surface); }
+  .bg-dc-card      { background-color: var(--dc-card); }
+  .bg-dc-input     { background-color: var(--dc-input); }
+
+  /* Borders */
+  .border-dc       { border-color: var(--dc-border); }
+  .border-dc-hover { border-color: var(--dc-border-hover); }
+}
+
+/* ============================================================
+   AUTOMATIC OVERRIDES FOR HARDCODED TAILWIND ARBITRARY VALUES
+   These map the existing hex-based classes to CSS variables,
+   so components need not be touched for background/border theming.
+   ============================================================ */
+
+/* Backgrounds */
+.bg-\[\#0F1729\],
+.bg-\[\#0B1628\]          { background-color: var(--dc-surface)  !important; }
+.bg-\[\#1A2744\]          { background-color: var(--dc-card)     !important; }
+.bg-\[\#243154\]          { background-color: var(--dc-input)    !important; }
+
+/* Borders */
+.border-\[\#2D3E5F\]      { border-color: var(--dc-border)       !important; }
+.border-\[\#3D4E6F\]      { border-color: var(--dc-border-hover) !important; }
+.border-\[\#1E3A5F\]      { border-color: var(--dc-border-2)     !important; }
+
+/* For "border-[#2D3E5F]/50" — Tailwind opacity modifier generates a separate class */
+.border-\[\#2D3E5F\]\/50  { border-color: color-mix(in srgb, var(--dc-border) 50%, transparent) !important; }
+
+/* Muted / faint text  */
+.text-\[\#94A3B8\]        { color: var(--dc-muted)               !important; }
+.text-\[\#64748B\]        { color: var(--dc-faint)               !important; }
+.text-\[\#E2E8F0\]        { color: var(--dc-text-body)           !important; }
+
+/* Primary text — only in light mode we override text-white to near-black
+   We scope it inside dc-surface backgrounds so button/badge text stays white */
+html.light .bg-\[\#0F1729\] .text-white,
+html.light .bg-\[\#0B1628\] .text-white,
+html.light .bg-dc-surface .text-white { color: var(--dc-text) !important; }
+
+/* Card component overrides */
+html.light .bg-\[\#1A2744\] .text-white { color: var(--dc-text) !important; }
+
+/* ============================================================
+   COMPONENT CLASSES
+   ============================================================ */
+
+/* Glass card effect */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #6366F1, #8B5CF6, #06B6D4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glow effect */
+.glow-indigo {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+
+/* Smooth transitions for theme switching */
+.glass-card,
+[class*="bg-[#"],
+[class*="border-[#"],
+[class*="text-[#"] {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Progress bar animation */
+.progress-fill {
+  transition: width 1s ease-in-out;
+}
+
+/* Metric card hover */
+.metric-card:hover {
+  border-color: #6366F1;
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.2);
+}
