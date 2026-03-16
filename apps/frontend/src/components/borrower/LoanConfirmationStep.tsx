@@ -64,7 +64,11 @@ export default function LoanConfirmationStep({
   const [polling, setPolling] = useState(false);
 
   // Claim funds (borrower calls fund_loan on-chain to receive principal)
-  const [claimed, setClaimed] = useState(false);
+  // Inizializzato da localStorage per sopravvivere ai re-mount
+  const claimedKey = `deficredit_claimed_${loanRequestId}`;
+  const [claimed, setClaimed] = useState<boolean>(
+    () => typeof window !== "undefined" && localStorage.getItem(claimedKey) === "true"
+  );
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimTxHash, setClaimTxHash] = useState<string | null>(null);
@@ -149,6 +153,37 @@ export default function LoanConfirmationStep({
     recoverOnChainId();
   }, [loanDetails?.status_label, loanDetails?.on_chain_loan_id, account?.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Verifica on-chain se fund_loan è già stato eseguito ───────────────────
+  // Se il loan è "funded" e non abbiamo LoanApproval in wallet, significa che
+  // il borrower ha già chiamato fund_loan in una sessione precedente.
+  useEffect(() => {
+    if (claimed) return; // già sappiamo che è stato reclamato
+    if (loanDetails?.status_label !== "funded") return;
+    if (!contractsDeployed() || !account?.address) return;
+
+    const checkClaimed = async () => {
+      try {
+        const packageId = getPackageId();
+        if (!packageId) return;
+        const result = await client.getOwnedObjects({
+          owner: account.address,
+          filter: { StructType: `${packageId}::loan::LoanApproval` },
+          options: { showType: true },
+        });
+        // Se non c'è nessun LoanApproval nel wallet ma il loan è funded,
+        // significa che fund_loan è già stato eseguito.
+        if (result.data.length === 0) {
+          setClaimed(true);
+          localStorage.setItem(claimedKey, "true");
+        }
+      } catch {
+        // Non bloccante
+      }
+    };
+
+    checkClaimed();
+  }, [loanDetails?.status_label, account?.address, claimed]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleManualRefresh = async () => {
     setPolling(true);
     await fetchLoanDetails();
@@ -181,13 +216,17 @@ export default function LoanConfirmationStep({
       }
 
       // ── Step 1: Find LoanApproval in borrower's wallet ─────────────────────
-      // The lender creates a LoanApproval via approve_loan TX and it lands in
-      // the borrower's wallet. We find it by StructType and match loan_id.
+      console.log("[claim] Cerco LoanApproval nel wallet", {
+        owner: account.address,
+        structType: `${packageId}::loan::LoanApproval`,
+        dbLoanId: loanDetails.on_chain_loan_id,
+      });
       const approvalResult = await client.getOwnedObjects({
         owner: account.address,
         filter: { StructType: `${packageId}::loan::LoanApproval` },
         options: { showContent: true, showType: true },
       });
+      console.log("[claim] getOwnedObjects risposta:", JSON.stringify(approvalResult.data, null, 2));
 
       let approvalObjectId: string | null = null;
       let approvalLoanId: string | null = null;
@@ -260,6 +299,7 @@ export default function LoanConfirmationStep({
       setClaimTxHash(execResult.digest);
       await client.waitForTransaction({ digest: execResult.digest });
       setClaimed(true);
+      localStorage.setItem(claimedKey, "true");
     } catch (err) {
       setClaimError((err as Error).message);
     } finally {

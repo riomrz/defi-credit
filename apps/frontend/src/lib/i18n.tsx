@@ -220,10 +220,11 @@ const en: Translations = {
   "lenderDash.rejected": "Request rejected",
   "lenderDash.iotaPrincipal": "IOTA principal",
   "lenderDash.viewTx": "View tx",
+  "lenderDash.refresh": "Refresh",
   "lenderDash.noOnChainId":
     "⚠ LoanPosition not indexed — on-chain approval TX will be skipped. " +
     "The borrower's request_loan TX likely failed due to stale pool objects. " +
-    "Re-run init-pools-onchain.ts after re-deploying the contract, then ask the borrower to resubmit.",
+    "Re-run init-pools-autofund.mjs after re-deploying the contract, then ask the borrower to resubmit.",
 
   // ── Resume loan ───────────────────────────────────────────────────────────
   "resume.title": "Active Loan Found",
@@ -460,6 +461,7 @@ const it: Translations = {
   "lenderDash.rejected": "Richiesta rifiutata",
   "lenderDash.iotaPrincipal": "Capitale in IOTA",
   "lenderDash.viewTx": "Vedi tx",
+  "lenderDash.refresh": "Aggiorna",
   "lenderDash.noOnChainId":
     "⚠ LoanPosition non indicizzato — la TX di approvazione on-chain verrà saltata. " +
     "La TX request_loan del borrower è probabilmente fallita per pool non aggiornate. " +

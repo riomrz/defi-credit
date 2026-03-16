@@ -131,30 +131,44 @@ export default function MarketplaceStep({
         const digest = execResult.digest;
         setTxHash(digest);
 
-        // Recupera l'object ID del LoanPosition NFT creato dalla TX
-        // e lo salva nel backend affinché il lender possa usarlo in fund_loan
+        // Attende conferma on-chain con effects + objectChanges in una sola chiamata.
         try {
-          const txBlock = await client.getTransactionBlock({
+          const confirmed = await client.waitForTransaction({
             digest,
-            options: { showObjectChanges: true },
+            options: { showObjectChanges: true, showEffects: true },
           });
-          const loanPositionObj = txBlock.objectChanges?.find(
+
+          const txStatus = (confirmed as any).effects?.status?.status;
+          console.log("[request_loan] TX status:", txStatus, "| digest:", digest);
+
+          if (txStatus && txStatus !== "success") {
+            const errMsg = (confirmed as any).effects?.status?.error ?? "unknown";
+            console.error("[request_loan] TX fallita on-chain:", errMsg);
+            throw new Error(`request_loan TX fallita: ${errMsg}`);
+          }
+
+          console.log("[request_loan] objectChanges:", JSON.stringify(confirmed.objectChanges, null, 2));
+
+          const loanPositionObj = (confirmed.objectChanges ?? []).find(
             (c) =>
               c.type === "created" &&
               "objectType" in c &&
               typeof c.objectType === "string" &&
               c.objectType.includes("::loan::LoanPosition")
           );
+
           if (loanPositionObj && "objectId" in loanPositionObj) {
             await api.saveLoanOnChainId({
               loan_request_id: result.loan_request_id,
               on_chain_loan_id: loanPositionObj.objectId,
               tx_digest: digest,
             });
+            console.log("[request_loan] ✓ LoanPosition salvato:", loanPositionObj.objectId);
+          } else {
+            console.warn("[request_loan] ⚠ LoanPosition non trovato in objectChanges.");
           }
         } catch (indexErr) {
-          // Non bloccante: il flusso off-chain continua normalmente
-          console.warn("Could not index LoanPosition object ID:", indexErr);
+          console.warn("[request_loan] Errore salvataggio LoanPosition:", indexErr);
         }
       }
 

@@ -12,7 +12,7 @@ export function middleware(req: NextRequest) {
 
   if (allowedOrigins.includes(origin) || process.env.NODE_ENV === "development") {
     res.headers.set("Access-Control-Allow-Origin", origin || "*");
-    res.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   }
 

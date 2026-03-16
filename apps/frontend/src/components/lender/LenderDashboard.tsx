@@ -3,9 +3,10 @@ import { useState, useEffect } from "react";
 import {
   Coins, CheckCircle2, XCircle, Loader2, Shield, AlertCircle,
   ChevronDown, ChevronUp, Award, Wallet, PlusCircle, ExternalLink, Info,
+  RefreshCw,
 } from "lucide-react";
 import {
-  useCurrentAccount, useIotaClientQuery, useSignAndExecuteTransaction,
+  useCurrentAccount, useIotaClient, useIotaClientQuery, useSignAndExecuteTransaction,
 } from "@iota/dapp-kit";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -69,6 +70,7 @@ export default function LenderDashboard({ wallet }: Props) {
       { enabled: Boolean(account?.address) }
     );
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const client = useIotaClient();
 
   const [pools, setPools] = useState<Pool[]>([]);
   const [selectedPool, setSelectedPool] = useState<Pool | null>(null);
@@ -79,7 +81,10 @@ export default function LenderDashboard({ wallet }: Props) {
   const [actionState, setActionState] = useState<
     Record<string, "idle" | "loading" | "approved" | "rejected">
   >({});
+  const [approveError, setApproveError] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+
+  const [refreshingLoans, setRefreshingLoans] = useState(false);
 
   const [depositAmount, setDepositAmount] = useState(100);
   const [depositing, setDepositing] = useState(false);
@@ -109,6 +114,21 @@ export default function LenderDashboard({ wallet }: Props) {
       .finally(() => setLoadingLoans(false));
   };
 
+  // Ricarica solo la lista prestiti senza cambiare pool selezionata
+  const refreshLoans = async (pool?: Pool | null) => {
+    const target = pool ?? selectedPool;
+    if (!target) return;
+    setRefreshingLoans(true);
+    try {
+      const data = await api.poolLoans(target.pool_id);
+      setLoans(data as LoanItem[]);
+    } catch {
+      // silently fail — loans list stays as-is
+    } finally {
+      setRefreshingLoans(false);
+    }
+  };
+
   const handleDeposit = async () => {
     if (!selectedPool) return;
     setDepositError(null);
@@ -132,6 +152,7 @@ export default function LenderDashboard({ wallet }: Props) {
 
   const handleApprove = async (loan: LoanItem) => {
     setActionState((s) => ({ ...s, [loan.loan_id]: "loading" }));
+    setApproveError((e) => { const n = { ...e }; delete n[loan.loan_id]; return n; });
     try {
       // 1. Aggiorna il DB: status → 1 (funded)
       await api.fundLoan({
@@ -140,23 +161,52 @@ export default function LenderDashboard({ wallet }: Props) {
         lender_address: wallet.address,
       });
 
-      // 2. Se i contratti sono deployed e abbiamo l'on-chain ID del LoanPosition,
+      // 2. Ri-fetch dei dati freschi del loan per ottenere l'on_chain_id aggiornato.
+      //    Il borrower potrebbe aver salvato l'ID dopo che il lender ha caricato la pagina.
+      let freshOnChainId = loan.on_chain_id ?? null;
+      if (contractsDeployed()) {
+        try {
+          const fresh = await api.getLoan(loan.loan_id);
+          freshOnChainId = fresh.on_chain_loan_id ?? freshOnChainId;
+          console.log("[approve] on_chain_id dal DB (fresh):", freshOnChainId);
+        } catch {
+          console.warn("[approve] Impossibile ri-fetch loan, uso dati locali");
+        }
+      }
+
+      // 3. Se i contratti sono deployed e abbiamo l'on-chain ID del LoanPosition,
       //    il lender firma approve_loan on-chain → crea LoanApproval per il borrower.
-      //    Il borrower lo presenterà in fund_loan per ricevere i fondi.
-      if (contractsDeployed() && loan.on_chain_id && loan.borrower_address) {
-        const tx = buildApproveLoanTx(loan.on_chain_id, loan.borrower_address);
-        await signAndExecute({ transaction: tx as any });
+      if (contractsDeployed() && freshOnChainId && loan.borrower_address) {
+        console.log("[approve] Invio approve_loan TX", {
+          loanOnChainId: freshOnChainId,
+          borrowerAddress: loan.borrower_address,
+        });
+        const tx = buildApproveLoanTx(freshOnChainId, loan.borrower_address);
+        const execResult = await signAndExecute({ transaction: tx as any });
+        console.log("[approve] TX inviata, digest:", execResult.digest);
+        await client.waitForTransaction({ digest: execResult.digest });
+        console.log("[approve] TX confermata ✓ — LoanApproval trasferita a", loan.borrower_address);
+      } else if (contractsDeployed() && !freshOnChainId) {
+        console.warn("[approve] on_chain_id ancora mancante dopo re-fetch — approve_loan TX saltata");
       }
 
       setActionState((s) => ({ ...s, [loan.loan_id]: "approved" }));
       await refetchBalance();
-    } catch {
+      await refreshLoans();
+    } catch (err) {
       setActionState((s) => ({ ...s, [loan.loan_id]: "idle" }));
+      setApproveError((e) => ({
+        ...e,
+        [loan.loan_id]: (err as Error).message ?? "Errore sconosciuto",
+      }));
     }
   };
 
-  const handleReject = (loanId: string) =>
+  const handleReject = (loanId: string) => {
     setActionState((s) => ({ ...s, [loanId]: "rejected" }));
+    // Dopo il reject, ricarica per mostrare lo stato aggiornato
+    // (in futuro il reject potrebbe aggiornare il DB)
+  };
 
   const utilizationPct = (pool: Pool) => {
     const avail = Number(pool.available_liquidity);
@@ -350,12 +400,22 @@ export default function LenderDashboard({ wallet }: Props) {
       {/* Loan Requests */}
       {selectedPool && (
         <div>
-          <h3 className="text-base font-semibold text-dc mb-4">
-            {t("lenderDash.pendingRequests")}
-            {!loadingLoans && (
-              <span className="ml-2 text-sm text-[#94A3B8] font-normal">({loans.length})</span>
-            )}
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-dc">
+              {t("lenderDash.pendingRequests")}
+              {!loadingLoans && (
+                <span className="ml-2 text-sm text-[#94A3B8] font-normal">({loans.length})</span>
+              )}
+            </h3>
+            <button
+              onClick={() => refreshLoans()}
+              disabled={refreshingLoans || loadingLoans}
+              className="flex items-center gap-1.5 text-xs text-[#94A3B8] hover:text-dc transition-colors disabled:opacity-40"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshingLoans ? "animate-spin" : ""}`} />
+              {t("lenderDash.refresh")}
+            </button>
+          </div>
 
           {loadingLoans && (
             <div className="flex items-center gap-2 py-6">
@@ -506,6 +566,16 @@ export default function LenderDashboard({ wallet }: Props) {
                       )}
 
                       {/* Actions */}
+                      {approveError[loan.loan_id] && (
+                        <div className="mb-3 flex items-start gap-2 p-3 bg-rose-900/20 border border-rose-600/30 rounded-xl">
+                          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-xs font-semibold text-rose-300 mb-0.5">Errore approve_loan TX</p>
+                            <p className="text-xs text-rose-400 break-all">{approveError[loan.loan_id]}</p>
+                          </div>
+                        </div>
+                      )}
+
                       {state === "idle" && (
                         <div className="flex gap-3">
                           <Button variant="success" className="flex-1" onClick={() => handleApprove(loan)} size="md">
