@@ -1,5 +1,6 @@
 /// DefiCredit Loan Module
 /// Manages loan lifecycle: request → approve (lender) → fund (borrower) → repay
+#[allow(duplicate_alias)]
 module deficredit::loan {
     use iota::object::{Self, UID, ID};
     use iota::transfer;
@@ -17,11 +18,10 @@ module deficredit::loan {
     // ===== Error codes =====
     const ENotBorrower: u64 = 1;
     const ENotFundedState: u64 = 2;
-    const EAlreadyFunded: u64 = 3;
     const EInvalidRepayAmount: u64 = 4;
     const ELoanNotRequested: u64 = 5;
-    const EInsufficientRepayment: u64 = 6;
     const EBadApproval: u64 = 7;   // approval.loan_id != loan object ID
+    const EWrongPool: u64 = 8;     // pool passed does not match loan.pool_id
 
     // ===== Structs =====
 
@@ -155,6 +155,7 @@ module deficredit::loan {
     /// Requires:
     ///   - loan in STATUS_REQUESTED
     ///   - approval.loan_id == this loan's object ID
+    ///   - pool matches loan.pool_id (prevents draining the wrong pool)
     public entry fun fund_loan(
         loan: &mut LoanPosition,
         approval: LoanApproval,
@@ -162,6 +163,9 @@ module deficredit::loan {
         ctx: &mut TxContext
     ) {
         assert!(loan.status == STATUS_REQUESTED, ELoanNotRequested);
+
+        // Verify the pool passed matches the one recorded in the loan
+        assert!(loan.pool_id == pool::get_pool_id(pool), EWrongPool);
 
         // Verify the approval is for THIS specific loan
         let loan_id = object::uid_to_inner(&loan.id);
@@ -190,13 +194,17 @@ module deficredit::loan {
     }
 
     /// Borrower repays (partial or full) a funded loan.
+    /// Overpayment is automatically refunded to the borrower.
     public entry fun repay_loan(
         loan: &mut LoanPosition,
-        payment: Coin<IOTA>,
+        mut payment: Coin<IOTA>,
         pool: &mut Pool,
         ctx: &mut TxContext
     ) {
         assert!(loan.status == STATUS_FUNDED, ENotFundedState);
+
+        // Verify the pool passed matches the one recorded in the loan
+        assert!(loan.pool_id == pool::get_pool_id(pool), EWrongPool);
 
         let amount = coin::value(&payment);
         assert!(amount > 0, EInvalidRepayAmount);
@@ -205,11 +213,16 @@ module deficredit::loan {
         let borrower = loan.borrower;
         assert!(tx_context::sender(ctx) == borrower, ENotBorrower);
 
-        loan.outstanding_balance = if (amount >= loan.outstanding_balance) {
-            0
+        // Refund any overpayment so the borrower never loses excess funds
+        let pay_amount = if (amount > loan.outstanding_balance) {
+            let excess = coin::split(&mut payment, amount - loan.outstanding_balance, ctx);
+            transfer::public_transfer(excess, borrower);
+            loan.outstanding_balance
         } else {
-            loan.outstanding_balance - amount
+            amount
         };
+
+        loan.outstanding_balance = loan.outstanding_balance - pay_amount;
 
         let fully_repaid = loan.outstanding_balance == 0;
         if (fully_repaid) {
@@ -219,7 +232,7 @@ module deficredit::loan {
         event::emit(LoanRepaid {
             loan_id,
             borrower,
-            amount,
+            amount: pay_amount,
             outstanding_balance: loan.outstanding_balance,
             fully_repaid,
         });

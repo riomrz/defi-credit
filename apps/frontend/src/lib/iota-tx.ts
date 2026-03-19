@@ -130,6 +130,29 @@ export function buildRepayLoanTx(
   return tx;
 }
 
+/**
+ * Lender: withdraw deposited liquidity from a pool.
+ * The LPPosition object is consumed (deleted) inside the Move function.
+ *
+ * poolObjectId   — the shared Pool object ID
+ * lpPositionId   — the LPPosition object ID (owned by lender)
+ */
+export function buildWithdrawLiquidityTx(
+  poolObjectId: string,
+  lpPositionId: string
+): Transaction {
+  const pkg = requirePackage();
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${pkg}::${POOL_MODULE}::withdraw_liquidity`,
+    arguments: [
+      tx.object(poolObjectId),  // &mut Pool (shared)
+      tx.object(lpPositionId),  // LPPosition by value (consumed)
+    ],
+  });
+  return tx;
+}
+
 /** Whether contracts are deployed (MOVE_PACKAGE_ID is set) */
 export function contractsDeployed(): boolean {
   return Boolean(PACKAGE_ID);

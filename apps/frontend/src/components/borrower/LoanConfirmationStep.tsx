@@ -15,6 +15,7 @@ import { buildFundLoanTx, buildRepayLoanTx, contractsDeployed, getPackageId } fr
 import {
   useSignAndExecuteTransaction,
   useIotaClient,
+  useIotaClientQuery,
   useCurrentAccount,
 } from "@iota/dapp-kit";
 
@@ -57,6 +58,11 @@ export default function LoanConfirmationStep({
   const client = useIotaClient();
   const account = useCurrentAccount();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const { refetch: refetchBalance } = useIotaClientQuery(
+    "getBalance",
+    { owner: account?.address ?? "" },
+    { enabled: Boolean(account?.address), refetchInterval: 10_000 }
+  );
 
   const [copied, setCopied] = useState(false);
   const [loanDetails, setLoanDetails] = useState<LoanDetails | null>(null);
@@ -300,6 +306,7 @@ export default function LoanConfirmationStep({
       await client.waitForTransaction({ digest: execResult.digest });
       setClaimed(true);
       localStorage.setItem(claimedKey, "true");
+      void refetchBalance();
     } catch (err) {
       setClaimError((err as Error).message);
     } finally {
@@ -355,6 +362,7 @@ export default function LoanConfirmationStep({
       setRepaying(false);
       // Always refresh so local state matches DB
       await fetchLoanDetails();
+      void refetchBalance();
     }
   };
 

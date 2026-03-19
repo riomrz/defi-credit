@@ -1,5 +1,6 @@
 /// DefiCredit Pool Module
 /// Manages liquidity pools and LP positions on IOTA
+#[allow(duplicate_alias)]
 module deficredit::pool {
     use iota::object::{Self, UID, ID};
     use iota::transfer;
@@ -8,13 +9,12 @@ module deficredit::pool {
     use iota::iota::IOTA;
     use iota::balance::{Self, Balance};
     use iota::event;
-    use std::vector;
 
     // ===== Error codes =====
     const EInsufficientLiquidity: u64 = 1;
     const EInvalidAmount: u64 = 2;
     const ENotPoolOwner: u64 = 3;
-    const EInsufficientShareBalance: u64 = 4;
+    const EWrongPool: u64 = 5;
 
     // ===== Structs =====
 
@@ -156,6 +156,8 @@ module deficredit::pool {
     ) {
         let lender = tx_context::sender(ctx);
         assert!(lp_pos.lender == lender, ENotPoolOwner);
+        // Verify the LP position belongs to THIS pool, not a different one
+        assert!(lp_pos.pool_id == object::uid_to_inner(&pool.id), EWrongPool);
 
         let amount = lp_pos.deposited_amount;
         let available = balance::value(&pool.liquidity);

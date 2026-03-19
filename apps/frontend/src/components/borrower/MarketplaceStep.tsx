@@ -73,7 +73,7 @@ export default function MarketplaceStep({
   const { data: balanceData, isLoading: balanceLoading } = useIotaClientQuery(
     "getBalance",
     { owner: account?.address ?? "" },
-    { enabled: Boolean(account?.address) }
+    { enabled: Boolean(account?.address), refetchInterval: 10_000 }
   );
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
@@ -86,6 +86,9 @@ export default function MarketplaceStep({
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
 
+  // On-chain pool balances: poolId → balance in IOTA
+  const [onChainBalances, setOnChainBalances] = useState<Record<string, number>>({});
+
   // Real balance in IOTA (parsed from nanos)
   const balanceNano = balanceData ? BigInt(balanceData.totalBalance) : BigInt(0);
   const balanceIota = balanceLoading
@@ -95,15 +98,46 @@ export default function MarketplaceStep({
   useEffect(() => {
     api
       .eligiblePools(score, riskBand)
-      .then(setPools)
+      .then((fetched) => {
+        setPools(fetched);
+        // Fetch on-chain balances for pools that have an on_chain_id
+        if (!contractsDeployed()) return;
+        fetched.forEach((pool) => {
+          if (!pool.on_chain_id) return;
+          client.getObject({ id: pool.on_chain_id, options: { showContent: true } })
+            .then((result) => {
+              const content = result.data?.content;
+              if (content?.dataType !== "moveObject") return;
+              const fields = content.fields as Record<string, unknown>;
+              // Pool.liquidity è Balance<IOTA>, serializzato come { value: "nanos" }
+              const raw = fields.liquidity;
+              let nanos = 0;
+              if (typeof raw === "number") nanos = raw;
+              else if (typeof raw === "string") nanos = Number(raw);
+              else if (raw && typeof raw === "object" && "value" in (raw as object)) {
+                nanos = Number((raw as { value: unknown }).value);
+              }
+              setOnChainBalances((prev) => ({ ...prev, [pool.pool_id]: nanos / 1_000_000_000 }));
+            })
+            .catch(() => {/* non bloccante */});
+        });
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [score, riskBand]);
+  }, [score, riskBand]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Max loan is capped by pool's available liquidity (not wallet balance)
+  // Max loan is capped by pool's real on-chain balance (or DB value as fallback)
   const maxLoan = selectedPool
-    ? Number(selectedPool.available_liquidity) / 100
+    ? (onChainBalances[selectedPool.pool_id] !== undefined
+        ? onChainBalances[selectedPool.pool_id]
+        : Number(selectedPool.available_liquidity) / 100)
     : undefined;
+
+  // True if the selected pool has zero on-chain liquidity
+  const selectedPoolEmpty = selectedPool
+    && contractsDeployed()
+    && onChainBalances[selectedPool.pool_id] !== undefined
+    && onChainBalances[selectedPool.pool_id] === 0;
 
 
   const handleApply = async () => {
@@ -299,9 +333,17 @@ export default function MarketplaceStep({
               <div className="px-5 pb-5 grid grid-cols-3 gap-3">
                 <div className="bg-[#243154] rounded-xl p-3">
                   <p className="text-xs text-[#94A3B8] mb-1">{t("market.available")}</p>
-                  <p className="text-sm font-semibold text-dc">
-                    {formatAmount(Number(pool.available_liquidity) / 100)} IOTA
-                  </p>
+                  {onChainBalances[pool.pool_id] !== undefined ? (
+                    <p className={`text-sm font-semibold ${
+                      onChainBalances[pool.pool_id] === 0 ? "text-rose-400" : "text-emerald-400"
+                    }`}>
+                      {onChainBalances[pool.pool_id].toLocaleString(undefined, { maximumFractionDigits: 2 })} IOTA
+                    </p>
+                  ) : (
+                    <p className="text-sm font-semibold text-dc">
+                      {formatAmount(Number(pool.available_liquidity) / 100)} IOTA
+                    </p>
+                  )}
                 </div>
                 <div className="bg-[#243154] rounded-xl p-3">
                   <p className="text-xs text-[#94A3B8] mb-1">{t("market.minScore")}</p>
@@ -425,6 +467,16 @@ export default function MarketplaceStep({
                 </span>
               </div>
             </div>
+
+            {selectedPoolEmpty && (
+              <div className="flex items-start gap-2 p-3 bg-rose-900/20 border border-rose-600/40 rounded-xl">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-rose-400">
+                  <strong className="block mb-0.5">Pool vuota</strong>
+                  Questa pool non ha liquidità on-chain. Puoi inviare la richiesta, ma non potrai ricevere i fondi finché il lender non deposita IOTA nella pool.
+                </p>
+              </div>
+            )}
 
             <div className="flex items-start gap-2 p-3 bg-indigo-900/20 border border-indigo-600/20 rounded-xl">
               <Shield className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
