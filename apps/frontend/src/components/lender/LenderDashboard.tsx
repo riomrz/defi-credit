@@ -109,10 +109,19 @@ export default function LenderDashboard({ wallet }: Props) {
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [lpPositionId, setLpPositionId] = useState<string | null>(null);
   const [lpDepositedAmount, setLpDepositedAmount] = useState<number | null>(null);
+  const [lpShareBps, setLpShareBps] = useState<number | null>(null);
 
-  // On-chain pool balance (real, not from DB)
+  // On-chain pool balance e total shares (reali, non dal DB)
   const [onChainPoolBalance, setOnChainPoolBalance] = useState<number | null>(null);
+  const [poolTotalShares, setPoolTotalShares] = useState<number | null>(null);
   const [loadingPoolBalance, setLoadingPoolBalance] = useState(false);
+
+  // Importo realmente ritirabile: quota proporzionale come nel contratto Move
+  // amount = floor((share_bps * pool_balance_nanos) / total_shares) / 1e9
+  const withdrawableAmount: number | null =
+    lpShareBps !== null && poolTotalShares !== null && poolTotalShares > 0 && onChainPoolBalance !== null
+      ? Math.floor((lpShareBps * onChainPoolBalance * 1e9) / poolTotalShares) / 1e9
+      : null;
 
   const balanceNano = balanceData ? BigInt(balanceData.totalBalance) : BigInt(0);
   const balanceIota = balanceLoading ? null : Number(balanceNano) / 1_000_000_000;
@@ -124,6 +133,12 @@ export default function LenderDashboard({ wallet }: Props) {
       .finally(() => setLoadingPools(false));
   }, []);
 
+  // Filtra i loan escludendo quelli del wallet connesso (il lender non deve vedere i propri prestiti da borrower)
+  const filterLoans = (data: LoanItem[]) =>
+    account?.address
+      ? data.filter((l) => l.borrower_address.toLowerCase() !== account.address.toLowerCase())
+      : data;
+
   const selectPool = (pool: Pool) => {
     setSelectedPool(pool);
     setLoadingLoans(true);
@@ -132,7 +147,7 @@ export default function LenderDashboard({ wallet }: Props) {
     setShowDeposit(false);
     setOnChainPoolBalance(null);
     api.poolLoans(pool.pool_id)
-      .then((data) => setLoans(data as LoanItem[]))
+      .then((data) => setLoans(filterLoans(data as LoanItem[])))
       .catch(() => setLoans([]))
       .finally(() => setLoadingLoans(false));
   };
@@ -144,7 +159,7 @@ export default function LenderDashboard({ wallet }: Props) {
     setRefreshingLoans(true);
     try {
       const data = await api.poolLoans(target.pool_id);
-      setLoans(data as LoanItem[]);
+      setLoans(filterLoans(data as LoanItem[]));
     } catch {
       // silently fail — loans list stays as-is
     } finally {
@@ -156,6 +171,7 @@ export default function LenderDashboard({ wallet }: Props) {
   useEffect(() => {
     setLpPositionId(null);
     setLpDepositedAmount(null);
+    setLpShareBps(null);
     setWithdrawTxHash(null);
     setWithdrawError(null);
     if (!selectedPool?.on_chain_id || !account?.address || !contractsDeployed()) return;
@@ -178,27 +194,32 @@ export default function LenderDashboard({ wallet }: Props) {
         if (!fieldPoolId) continue;
         if (fieldPoolId.toLowerCase() !== selectedPool.on_chain_id.toLowerCase()) continue;
         setLpPositionId(item.data!.objectId);
-        const deposited = Number(fields.deposited_amount ?? 0);
-        setLpDepositedAmount(deposited / 1_000_000_000); // nanos → IOTA
+        setLpDepositedAmount(Number(fields.deposited_amount ?? 0) / 1_000_000_000);
+        setLpShareBps(Number(fields.share_bps ?? 0));
         break;
       }
     }).catch(() => {/* non bloccante */});
   }, [selectedPool?.on_chain_id, account?.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch real on-chain pool balance
+  // Helper: aggiorna balance e total_shares dalla pool on-chain
+  const refreshPoolOnChain = (poolId: string) => {
+    setLoadingPoolBalance(true);
+    client.getObject({ id: poolId, options: { showContent: true } })
+      .then((result) => {
+        const content = result.data?.content;
+        if (content?.dataType !== "moveObject") return;
+        const fields = content.fields as Record<string, unknown>;
+        setOnChainPoolBalance(parsePoolLiquidityNanos(fields) / 1_000_000_000);
+        setPoolTotalShares(Number(fields.total_shares ?? 0));
+      }).catch(() => {/* non bloccante */}).finally(() => setLoadingPoolBalance(false));
+  };
+
   useEffect(() => {
     setOnChainPoolBalance(null);
+    setPoolTotalShares(null);
     if (!selectedPool?.on_chain_id || !contractsDeployed()) return;
-    setLoadingPoolBalance(true);
-    client.getObject({
-      id: selectedPool.on_chain_id,
-      options: { showContent: true },
-    }).then((result) => {
-      const content = result.data?.content;
-      if (content?.dataType !== "moveObject") return;
-      const fields = content.fields as Record<string, unknown>;
-      setOnChainPoolBalance(parsePoolLiquidityNanos(fields) / 1_000_000_000);
-    }).catch(() => {/* non bloccante */}).finally(() => setLoadingPoolBalance(false));
+    refreshPoolOnChain(selectedPool.on_chain_id);
   }, [selectedPool?.on_chain_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWithdraw = async () => {
@@ -214,14 +235,7 @@ export default function LenderDashboard({ wallet }: Props) {
       setLpDepositedAmount(null);
       await refetchBalance();
       // Aggiorna il saldo on-chain della pool dopo il ritiro
-      setOnChainPoolBalance(null);
-      setLoadingPoolBalance(true);
-      client.getObject({ id: selectedPool.on_chain_id, options: { showContent: true } })
-        .then((r) => {
-          const f = (r.data?.content as { dataType: string; fields?: Record<string, unknown> } | undefined);
-          if (f?.dataType !== "moveObject" || !f.fields) return;
-          setOnChainPoolBalance(parsePoolLiquidityNanos(f.fields) / 1_000_000_000);
-        }).finally(() => setLoadingPoolBalance(false));
+      refreshPoolOnChain(selectedPool.on_chain_id);
     } catch (err) {
       setWithdrawError((err as Error).message ?? "Errore sconosciuto");
     } finally {
@@ -241,13 +255,7 @@ export default function LenderDashboard({ wallet }: Props) {
         await client.waitForTransaction({ digest: result.digest });
         await refetchBalance();
         // Aggiorna il saldo on-chain della pool dopo il deposito
-        setLoadingPoolBalance(true);
-        client.getObject({ id: selectedPool.on_chain_id, options: { showContent: true } })
-          .then((r) => {
-            const f = (r.data?.content as { dataType: string; fields?: Record<string, unknown> } | undefined);
-            if (f?.dataType !== "moveObject" || !f.fields) return;
-            setOnChainPoolBalance(parsePoolLiquidityNanos(f.fields) / 1_000_000_000);
-          }).finally(() => setLoadingPoolBalance(false));
+        refreshPoolOnChain(selectedPool.on_chain_id);
       } else {
         await new Promise((r) => setTimeout(r, 1200));
         setDepositTxHash("simulation-" + Math.random().toString(16).slice(2, 12));
@@ -302,14 +310,8 @@ export default function LenderDashboard({ wallet }: Props) {
       setActionState((s) => ({ ...s, [loan.loan_id]: "approved" }));
       await refetchBalance();
       await refreshLoans();
-      // Refresh pool balance
       if (selectedPool?.on_chain_id && contractsDeployed()) {
-        client.getObject({ id: selectedPool.on_chain_id, options: { showContent: true } })
-          .then((r) => {
-            const f = (r.data?.content as { dataType: string; fields?: Record<string, unknown> } | undefined);
-            if (f?.dataType !== "moveObject" || !f.fields) return;
-            setOnChainPoolBalance(parsePoolLiquidityNanos(f.fields) / 1_000_000_000);
-          }).catch(() => {});
+        refreshPoolOnChain(selectedPool.on_chain_id);
       }
     } catch (err) {
       setActionState((s) => ({ ...s, [loan.loan_id]: "idle" }));
@@ -550,15 +552,25 @@ export default function LenderDashboard({ wallet }: Props) {
                   )}
                 </div>
 
-                {/* Warning: fondi in prestito — ritiro parzialmente bloccato */}
-                {lpDepositedAmount !== null && onChainPoolBalance !== null && onChainPoolBalance < lpDepositedAmount && (
+                {/* Mostra quanto sarà effettivamente ritirato (deposito + interessi maturati) */}
+                {withdrawableAmount !== null && withdrawableAmount !== lpDepositedAmount && (
+                  <div className="flex items-center justify-between px-3 py-2 bg-emerald-900/20 border border-emerald-600/30 rounded-xl">
+                    <span className="text-xs text-[#94A3B8]">Ritirabile (incl. interessi)</span>
+                    <span className="text-sm font-semibold text-emerald-400">
+                      {withdrawableAmount.toLocaleString(undefined, { maximumFractionDigits: 4 })} IOTA
+                    </span>
+                  </div>
+                )}
+
+                {/* Warning: prestito attivo che riduce il saldo disponibile */}
+                {withdrawableAmount !== null && onChainPoolBalance !== null && withdrawableAmount > onChainPoolBalance && (
                   <div className="flex items-start gap-2 p-3 bg-amber-900/20 border border-amber-600/30 rounded-xl">
                     <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <p className="text-xs text-amber-400">
                       <strong className="block mb-0.5">Fondi parzialmente in prestito</strong>
-                      La pool contiene {onChainPoolBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} IOTA,
-                      ma il tuo deposito iniziale era {lpDepositedAmount.toLocaleString()} IOTA.
-                      Potrai ritirare l'intero importo solo dopo che i prestiti attivi saranno rimborsati.
+                      La tua quota ammonta a {withdrawableAmount.toLocaleString(undefined, { maximumFractionDigits: 4 })} IOTA
+                      ma la pool ne contiene solo {onChainPoolBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}.
+                      Potrai ritirare tutto dopo che i prestiti attivi saranno rimborsati.
                     </p>
                   </div>
                 )}
@@ -587,9 +599,13 @@ export default function LenderDashboard({ wallet }: Props) {
                   </div>
                 )}
 
-                {/* Disabilita il ritiro se la pool ha meno del deposito originale */}
                 {(() => {
-                  const canWithdraw = onChainPoolBalance === null || lpDepositedAmount === null || onChainPoolBalance >= lpDepositedAmount;
+                  // Il contratto richiede pool_balance >= withdrawable_amount
+                  const canWithdraw = withdrawableAmount === null || onChainPoolBalance === null
+                    || onChainPoolBalance >= withdrawableAmount;
+                  const label = withdrawableAmount !== null
+                    ? `${withdrawableAmount.toLocaleString(undefined, { maximumFractionDigits: 4 })} IOTA`
+                    : (lpDepositedAmount?.toLocaleString() ?? "") + " IOTA";
                   return (
                     <Button
                       variant="primary"
@@ -602,7 +618,7 @@ export default function LenderDashboard({ wallet }: Props) {
                       {withdrawing
                         ? "Ritiro in corso…"
                         : canWithdraw
-                        ? `Ritira ${lpDepositedAmount?.toLocaleString() ?? ""} IOTA`
+                        ? `Ritira ${label}`
                         : "Ritiro non disponibile (prestito attivo)"}
                     </Button>
                   );

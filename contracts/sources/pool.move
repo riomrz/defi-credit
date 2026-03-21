@@ -148,7 +148,9 @@ module deficredit::pool {
         transfer::transfer(lp_position, lender);
     }
 
-    /// Withdraw liquidity (simplified: withdraw exact deposited amount if available)
+    /// Withdraw liquidity proportional to the lender's share of the pool.
+    /// This ensures the lender receives both their original deposit and any
+    /// interest accrued from loan repayments.
     public entry fun withdraw_liquidity(
         pool: &mut Pool,
         lp_pos: LPPosition,
@@ -159,11 +161,19 @@ module deficredit::pool {
         // Verify the LP position belongs to THIS pool, not a different one
         assert!(lp_pos.pool_id == object::uid_to_inner(&pool.id), EWrongPool);
 
-        let amount = lp_pos.deposited_amount;
-        let available = balance::value(&pool.liquidity);
-        assert!(available >= amount, EInsufficientLiquidity);
+        // Calculate withdrawable amount proportional to the lender's share.
+        // amount = (lender_share_bps / total_shares_bps) * pool_balance
+        let pool_balance = balance::value(&pool.liquidity);
+        let share_bps = lp_pos.share_bps;
+        let amount = if (pool.total_shares == 0) {
+            0
+        } else {
+            (share_bps * pool_balance) / pool.total_shares
+        };
+        assert!(amount > 0, EInvalidAmount);
+        assert!(pool_balance >= amount, EInsufficientLiquidity);
 
-        let LPPosition { id, pool_id, lender: _, deposited_amount: _, share_bps } = lp_pos;
+        let LPPosition { id, pool_id, lender: _, deposited_amount: _, share_bps: _ } = lp_pos;
         object::delete(id);
 
         pool.total_shares = if (pool.total_shares >= share_bps) {
@@ -215,5 +225,9 @@ module deficredit::pool {
 
     public fun get_pool_id(pool: &Pool): ID {
         object::uid_to_inner(&pool.id)
+    }
+
+    public fun get_total_shares(pool: &Pool): u64 {
+        pool.total_shares
     }
 }
