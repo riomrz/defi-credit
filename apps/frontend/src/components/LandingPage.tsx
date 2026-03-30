@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { Shield, Zap, Lock, Globe, ArrowRight, ChevronRight } from "lucide-react";
 import { useT } from "@/lib/i18n";
 
@@ -28,9 +29,13 @@ export default function LandingPage({ onSelectBorrower, onSelectLender }: Props)
       {/* Navbar */}
       <nav className="px-8 py-5 flex items-center justify-between border-b border-[#2D3E5F]/50">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center">
-            <Shield className="w-5 h-5 text-white" />
-          </div>
+          <Image
+            src="/logo.png"
+            alt="DefiCredit logo"
+            width={36}
+            height={36}
+            className="rounded-xl"
+          />
           <span className="text-lg font-semibold text-dc">DefiCredit</span>
           <span className="ml-2 px-2 py-0.5 text-xs bg-indigo-900/60 text-indigo-300 rounded-full border border-indigo-600/30">
             IOTA Testnet
@@ -47,6 +52,17 @@ export default function LandingPage({ onSelectBorrower, onSelectLender }: Props)
 
       {/* Hero */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-20 text-center">
+        {/* Hero logo */}
+        <div className="mb-8">
+          <Image
+            src="/logo.png"
+            alt="DefiCredit logo"
+            width={120}
+            height={120}
+            className="mx-auto drop-shadow-[0_0_32px_rgba(99,102,241,0.5)]"
+          />
+        </div>
+
         {/* Badge */}
         <div className="mb-8 inline-flex items-center gap-2 px-4 py-2 bg-indigo-900/40 border border-indigo-600/40 rounded-full">
           <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
