@@ -1,23 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export function middleware(req: NextRequest) {
-  const res = NextResponse.next();
+const CORS_HEADERS = {
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
-  // CORS headers for frontend → backend communication
-  const origin = req.headers.get("origin") ?? "";
-  const allowedOrigins = [
+function getAllowedOrigins(): string[] {
+  return [
     "http://localhost:3000",
     process.env.FRONTEND_URL ?? "",
   ].filter(Boolean);
+}
 
-  if (allowedOrigins.includes(origin) || process.env.NODE_ENV === "development") {
-    res.headers.set("Access-Control-Allow-Origin", origin || "*");
-    res.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+export function middleware(req: NextRequest) {
+  const origin = req.headers.get("origin") ?? "";
+  const allowedOrigins = getAllowedOrigins();
+  const isAllowed = allowedOrigins.includes(origin) || process.env.NODE_ENV === "development";
+
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new NextResponse(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": isAllowed ? origin : "",
+        ...CORS_HEADERS,
+      },
+    });
   }
 
-  if (req.method === "OPTIONS") {
-    return new NextResponse(null, { status: 204, headers: res.headers });
+  const res = NextResponse.next();
+
+  if (isAllowed) {
+    res.headers.set("Access-Control-Allow-Origin", origin);
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
   }
 
   return res;
