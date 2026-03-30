@@ -10,7 +10,8 @@ export async function GET(req: NextRequest) {
     const { IotaClient } = await import("@iota/iota-sdk/client");
     const nodeUrl = process.env.IOTA_NODE_URL ?? "https://api.testnet.iota.cafe";
     const client = new IotaClient({ url: nodeUrl });
-    const identityClient = new IotaIdentityClient(client);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const identityClient = new IotaIdentityClient(client as any);
     const doc = await identityClient.resolveDid(did);
     return NextResponse.json({ did_document: doc.toJSON() });
   } catch (err) {

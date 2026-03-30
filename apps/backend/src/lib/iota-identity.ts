@@ -27,7 +27,8 @@ export async function signVcWithIota(
 
   const nodeUrl = process.env.IOTA_NODE_URL ?? "https://api.testnet.iota.cafe";
   const client = new IotaClient({ url: nodeUrl });
-  const identityClient = new IotaIdentityClient(client);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const identityClient = new IotaIdentityClient(client as any);
 
   // Resolve issuer DID document
   const issuerDoc = await identityClient.resolveDid(issuerDid);
@@ -69,7 +70,8 @@ export async function verifyVc(vcJwt: string, issuerDid: string): Promise<boolea
 
     const nodeUrl = process.env.IOTA_NODE_URL ?? "https://api.testnet.iota.cafe";
     const client = new IotaClient({ url: nodeUrl });
-    const identityClient = new IotaIdentityClient(client);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const identityClient = new IotaIdentityClient(client as any);
 
     const issuerDoc = await identityClient.resolveDid(issuerDid);
     const validator = new JwtCredentialValidator();
